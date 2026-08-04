@@ -99,4 +99,123 @@ module.exports = {
     const styles = {
       "0": { prompt: "", negative_prompt: "" }, // do nothing if style is 0
       "1": {
-        prompt: `${prompt}, cinematic still, emotional, harmonious,...
+        prompt: `${prompt}, cinematic still, emotional, harmonious, vignette, highly detailed, high budget, bokeh, cinemascope, moody, epic, gorgeous, film grain, grainy, perfect eyes, exclusive eyes`,
+        negative_prompt: "nsfw, cartoon, graphic, text, painting, crayon, graphite, abstract, glitch, deformed, mutated, ugly, disfigured"
+      },
+      "2": {
+        prompt: `${prompt}, cinematic photo, 35mm photograph, film, bokeh, professional, 4k, highly detailed, perfect eyes, exclusive eyes`,
+        negative_prompt: "nsfw, drawing, painting, crayon, sketch, graphite, impressionist, noisy, blurry, soft, deformed, ugly"
+      },
+      "3": {
+        prompt: `${prompt}, anime artwork, anime style, key visual, vibrant, studio anime, highly detailed, perfect eyes, exclusive eyes`,
+        negative_prompt: "nsfw, photo, deformed, black and white, realism, disfigured, low contrast"
+      },
+      "4": {
+        prompt: `${prompt}, manga style, vibrant, high-energy, detailed, iconic, Japanese comic style, perfect eyes, exclusive eyes`,
+        negative_prompt: "nsfw, ugly, deformed, noisy, blurry, low contrast, realism, photorealistic, Western comic style"
+      },
+      "5": {
+        prompt: `${prompt}, concept art, digital artwork, illustrative, painterly, matte painting, highly detailed, perfect eyes, exclusive eyes`,
+        negative_prompt: "nsfw, photo, photorealistic, realism, ugly"
+      },
+      "6": {
+        prompt: `${prompt}, pixel-art, low-res, blocky, pixel art style, 8-bit graphics, perfect eyes, exclusive eyes`,
+        negative_prompt: "nsfw, sloppy, messy, blurry, noisy, highly detailed, ultra textured, photo, realistic"
+      },
+      "7": {
+        prompt: `${prompt}, ethereal fantasy concept art, magnificent, celestial, ethereal, painterly, epic, majestic, magical, fantasy art, cover art, dreamy, perfect eyes, exclusive eyes`,
+        negative_prompt: "nsfw, photographic, realistic, realism, 35mm film, dslr, cropped, frame, text, deformed, glitch, noise, noisy, off-center, deformed, cross-eyed, closed eyes, bad anatomy, ugly, disfigured, sloppy, duplicate, mutated, black and white"
+      },
+      "8": {
+        prompt: `${prompt}, neonpunk style, cyberpunk, vaporwave, neon, vibes, vibrant, stunningly beautiful, crisp, detailed, sleek, ultramodern, magenta highlights, dark purple shadows, high contrast, cinematic, ultra detailed, intricate, professional, perfect eyes, exclusive eyes`,
+        negative_prompt: "nsfw, painting, drawing, illustration, glitch, deformed, mutated, cross-eyed, ugly, disfigured"
+      },
+      "9": {
+        prompt: `${prompt}, professional 3d model, octane render, highly detailed, volumetric, dramatic lighting, perfect eyes, exclusive eyes`,
+        negative_prompt: "nsfw, ugly, deformed, noisy, low poly, blurry, painting"
+      }
+    };
+
+    const finalPrompt = styles[styleIndex]?.prompt || presets[presetIndex].prompt;
+    const finalNegative = styles[styleIndex]?.negative_prompt || presets[presetIndex].negative_prompt;
+    const resolution = aspectRatioMap[aspectRatio] || aspectRatioMap["1:1"];
+    const session_hash = Math.random().toString(36).substring(2, 13);
+    const randomSeed = Math.floor(Math.random() * 1000000000);
+
+    const payload = {
+      data: [
+        finalPrompt,
+        finalNegative,
+        randomSeed,
+        resolution.width,
+        resolution.height,
+        7,
+        28,
+        "Euler a",
+        `${resolution.width} x ${resolution.height}`,
+        "(None)",
+        "Standard v3.1",
+        false,
+        0.55,
+        1.5,
+        true
+      ],
+      event_data: null,
+      fn_index: 5,
+      trigger_id: null,
+      session_hash
+    };
+
+    const headers = {
+      "User-Agent": "Mozilla/5.0",
+      "Content-Type": "application/json"
+    };
+
+    try {
+      await axios.post("https://asahina2k-animagine-xl-3-1.hf.space/queue/join", payload, { headers });
+
+      const res = await axios.get("https://asahina2k-animagine-xl-3-1.hf.space/queue/data", {
+        headers: {
+          "User-Agent": "Mozilla/5.0",
+          "Accept": "text/event-stream",
+          "Content-Type": "application/json"
+        },
+        params: { session_hash },
+        timeout: 30000
+      });
+
+      const events = res.data.split("\n\n");
+      let imageURL = null;
+
+      for (const evt of events) {
+        if (evt.startsWith("data:")) {
+          try {
+            const json = JSON.parse(evt.slice(5).trim());
+            if (json.msg === "process_completed" && json.success) {
+              imageURL = json.output?.data?.[0]?.[0]?.image?.url;
+              break;
+            }
+          } catch (e) {}
+        }
+      }
+
+      if (!imageURL) return message.reply("⚠️ Image not ready yet. Try again later.");
+
+      const imgRes = await axios.get(imageURL, { responseType: "stream" });
+      const cachePath = path.join(__dirname, "cache");
+      if (!fs.existsSync(cachePath)) fs.mkdirSync(cachePath);
+
+      const imgPath = path.join(cachePath, `${session_hash}.png`);
+      await pipeline(imgRes.data, fs.createWriteStream(imgPath));
+
+      message.reply({
+        body: `Style: ${styleIndex} | 🧩 Preset: ${presetIndex} | 📐 AR: ${aspectRatio}\n🧪 Seed: ${randomSeed}`,
+        attachment: fs.createReadStream(imgPath)
+      }, () => fs.unlinkSync(imgPath));
+
+    } catch (err) {
+      console.error(err);
+      message.reply("❌ Failed to generate image. Try again later.");
+    }
+  }
+};
